@@ -1,0 +1,332 @@
+import "strings"
+import "types"
+
+// Standard idiom for appending a value to a map in which the value is an array
+append_map_array_value = func(map_object, key, value) {
+	array = map_object[key] else []
+	append(array, value)
+	map_object[key] = array
+	return map_object
+}
+
+// Ensures the given list contains unique members
+unique = func(non_unique_list) {
+	unique_list = []
+
+	for non_unique_list as list_item {
+		if list_item not in unique_list {
+			append(unique_list, list_item)
+		}
+	}
+
+	return unique_list
+}
+
+is_equal_list = func(left, right) {
+	if length(left) != length(right) {
+		return false
+	}
+
+	for left as i, val {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Helper function to validate whether a given string is an IP within the RFC1918 IP ranges
+is_rfc1918_range = func(ip_address) {
+	if ip_address == null {
+		return false
+	}
+	if strings.has_prefix(ip_address, "10.") or strings.has_prefix(ip_address, "172.16.") or strings.has_prefix(ip_address, "192.168.") {
+		return true
+	}
+	return false
+}
+
+// Removes an element from an array
+remove_element = func(list, index) {
+	new_list = list[:index]
+	new_list += list[(index + 1):]
+	return new_list else []
+}
+
+// this function does what evaluate_attribute does, except this one can read the after_unknown section
+evaluate_raw_field = func(r, attribute) {
+
+	# Split the attribute into a list, using "." as the separator
+	attributes = strings.split(attribute, ".")
+
+	# Convert numeric strings to integers for indices
+	if attributes[0] matches "^[0-9]+$" {
+		a = int(attributes[0])
+		# Make sure r is of type list
+		if types.type_of(r) is not "list" {
+			return undefined
+		}
+	} else {
+		a = attributes[0]
+	}
+
+	new_r = r[a] else null
+
+	# Process based on length of attributes
+	# being greater than or equal to 1
+	if length(attributes) > 1 {
+
+		# Strip first element from attributes
+		attributes = attributes[1:length(attributes)]
+		attribute = strings.join(attributes, ".")
+
+		# Make recursive call
+		return evaluate_raw_field(new_r, attribute)
+	} else {
+
+		# We reached the end of the attribute and can stop the
+		# recursive calls and return the value of the attribute
+		return new_r
+
+	}
+}
+
+collect = func(iterable, collect_fun) {
+	collected_list = []
+	for iterable as item {
+		item = collect_fun(item)
+		if types.type_of(item) is "list" {
+			collected_list += item
+		} else {
+			append(collected_list, item)
+		}
+	}
+	return collected_list
+}
+
+flatten = func(_) {
+	# Recursively flattens a complex object into a string, terraform-style, that can be printed on the screen.
+	# This is needed to escape complex objects from printing, where a change to a resource's API data structure can break the policy in the future.
+	case types.type_of(_) {
+		when "list":
+			{
+				if _ == [] {
+					return "[]"
+				}
+				result = "["
+				results = []
+				for _ as item {
+					case types.type_of(item) {
+						when "list":
+							append(results, flatten(item))
+						when "map":
+							append(results, flatten(item))
+						when "string":
+							append(results, "\"" + item + "\"")
+						when "null":
+							append(results, "null")
+						when "undefined":
+							append(results, "undefined")
+						else:
+							append(results, string(item))
+					}
+				}
+				result = result + strings.join(results, ", ") + "]"
+				return result
+			}
+		when "map":
+			{
+				if _ == {} {
+					return "{}"
+				}
+				result = "{"
+				results = []
+				for _ as k, v {
+					mkey = k + ": "
+					case types.type_of(v) {
+						when "list":
+							mval = flatten(v)
+						when "map":
+							mval = flatten(v)
+						when "string":
+							mval = "\"" + v + "\""
+						when "null":
+							mval = "null"
+						when "undefined":
+							mval = "undefined"
+						else:
+							mval = string(v)
+					}
+					append(results, mkey + mval)
+				}
+				result = result + strings.join(results, ", ") + "}"
+				return result
+			}
+		when "string":
+			return "\"" + _ + "\""
+		when "null":
+			return "null"
+		when "undefined":
+			return "undefined"
+		else:
+			return string(_)
+	}
+}
+
+flatten_hi = func(_) {
+	# Similar to flatten() but more friendly. Avoids all the brackets to make the text easier to read
+	case types.type_of(_) {
+		when "list":
+			{
+				if _ == [] {
+					return "[]"
+				}
+				result = ""
+				results = []
+				for _ as item {
+					case types.type_of(item) {
+						when "list":
+							append(results, flatten_hi(item))
+						when "map":
+							append(results, flatten_hi(item))
+						when "string":
+							append(results, item)
+						when "null":
+							append(results, "null")
+						when "undefined":
+							append(results, "undefined")
+						else:
+							append(results, string(item))
+					}
+				}
+				result = result + strings.join(results, ", ")
+				if not strings.has_suffix(result, ";") {
+					result += ";"
+				}
+				return result
+			}
+		when "map":
+			{
+				if _ == {} {
+					return "{}"
+				}
+				result = ""
+				results = []
+				for _ as k, v {
+					mkey = k + ": "
+					case types.type_of(v) {
+						when "list":
+							mval = flatten_hi(v)
+						when "map":
+							mval = flatten_hi(v)
+						when "string":
+							mval = v
+						when "null":
+							mval = "null"
+						when "undefined":
+							mval = "undefined"
+						else:
+							mval = string(v)
+					}
+					append(results, mkey + mval)
+				}
+				result = result + strings.join(results, ", ")
+				if not strings.has_suffix(result, ";") {
+					result += ";"
+				}
+				return result
+			}
+		when "string":
+			return _
+		when "null":
+			return "null"
+		when "undefined":
+			return "undefined"
+		else:
+			return string(_)
+	}
+}
+
+log_error = func(resource_type, resource_name, message, data) {
+	# Prints a policy violation to the screen in a nicely formatted way.
+	message_data = "."
+	if data else "n/a" != null {
+		message_data = ": " + flatten_hi(data)
+	}
+	print("REASON: [" + resource_type + "]: `" + resource_name + "` " + message + message_data)
+	return true
+}
+
+print_trace = func(trace, title, message) {
+	# Prints a formatted error message to the screen, but only when the first parameter `trace` is true.
+	# Only use it for debugging.
+	trace and print("[TRACE]: " + title + ": " + flatten(message))
+	return true
+}
+
+str_padding = func(char, length) {
+	# String function to pad a character `length` number of times.
+	# Eg. str_padding(">",6) => ">>>>>>"
+	if length == 1 {
+		return char
+	} else {
+		return char + str_padding(char, length - 1)
+	}
+}
+
+get_resources_by_type_raw = func(tfplan_raw_config_obj, resource_type, root_path, depth) {
+	# Function RECURSIVELY crawls tfplan-v2.raw.configuration, and returns the config of all resources of a specified type.
+	# In addition, it also calulates the `hcl_path` and `hcl_root` of the resources, and appends it to the object.
+	# Eg: hcl_path = "module.gcp_on_prem_enabled_sa.vault_gcp_secret_static_account.default"
+	#     hcl_root = "module.gcp_on_prem_enabled_sa"
+	# Depth is just an internal variable for the function to know the recursion depth.
+	#
+	# Always call the function with (Sentinel doesn't support default values for functions):
+	#   - root_path=""
+	#   - depth=1
+	#
+	#
+	# Usage:
+	#   get_resources_by_type_raw(tfplan.raw.configuration.root_module, "vault_gcp_secret_static_account", "", 1)
+
+	results = []
+	trace = true
+
+	# TODO - outer IF block is for testing only
+	if "module_calls" in keys(tfplan_raw_config_obj) {
+		for tfplan_raw_config_obj.module_calls else [] as _, m {
+			if root_path != "" {
+				root_path += "."
+			}
+			child_path = root_path + "module." + _
+			print_trace(trace, "get_resources_by_type_raw: child_path", child_path)
+			nested = get_resources_by_type_raw(m.module, resource_type, child_path, depth + 1)
+			if nested != [] {
+				results += nested
+			}
+		}
+	}
+
+	# TODO - outer IF block is for testing only
+	if "resources" in keys(tfplan_raw_config_obj) {
+		for tfplan_raw_config_obj.resources else [] as r {
+			if r.type == resource_type and r.mode != "data" {
+				r["hcl_path"] = root_path + "." + r.address
+				r["hcl_root"] = root_path
+				append(results, r)
+				print_trace(trace, "get_resources_by_type_raw: FOUND", r.hcl_path)
+			}
+		}
+	}
+
+	return results
+}
+
+coal_join = func(list, sep) {
+	# Coalesce Join function; ie filter out the empty list elements before joining them
+	# eg: coal_join(["", "module.test","iam_member.foo"], ".") -> module.test.iam_member.foo
+	filtered = filter list as str { str != "" }
+	result = strings.join(filtered, sep)
+	return result
+}

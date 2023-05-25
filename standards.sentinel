@@ -1,0 +1,187 @@
+import "types"
+import "strings"
+import "tfrun"
+import "utilities" as utilities
+
+host_project_identifier = "immense-goose-455096"
+non_prod_trusted_image_project = "infinite-longhorn-125107"
+shared_trusted_image_project = "modern-robin-134117"
+app_shared_trusted_image_project = "teaching-aardvark-872971"
+os_shared_trusted_image_project = "notable-oriole-704524"
+
+acceptable_regions = ["EUROPE-WEST1", "EUROPE-WEST2"]
+
+is_module_development = func() {
+	is_modules_app = strings.has_prefix(tfapp(), "modules")
+	env_type = tfenv()[0:3]
+	is_dev_or_prv = (env_type == "dev") or (env_type == "prv")
+	return is_modules_app and is_dev_or_prv
+}
+
+is_url_in_trusted_images_project = func(binding_resource) {
+	return is_url_in_folder_specific_trusted_images_project(binding_resource) or is_url_in_shared_trusted_images_project(binding_resource)
+}
+
+// Checks that a given project is the trusted images project
+is_url_in_shared_trusted_images_project = func(binding_resource) {
+	if types.type_of(binding_resource) is "undefined" or types.type_of(binding_resource) is "null" {
+		return false
+	}
+	return binding_resource contains shared_trusted_image_project or binding_resource contains app_shared_trusted_image_project or binding_resource contains os_shared_trusted_image_project
+}
+
+// Checks that a given project is the env-specific trusted images project
+is_url_in_folder_specific_trusted_images_project = func(binding_resource) {
+	if tfenv() != "prd" and tfenv() != "shd" {
+		return binding_resource contains non_prod_trusted_image_project
+	} else {
+		return false
+	}
+}
+
+is_url_host_project_level_resource = func(binding_resource) {
+	return strings.has_suffix(binding_resource, host_project_identifier)
+}
+
+is_url_anywhere_in_host_project = func(binding_resource) {
+	return binding_resource contains host_project_identifier
+}
+
+project_matches = func(a, b) {
+	return a == b or a == "projects/" + b
+}
+
+is_host_subnetwork = func(binding_resource) {
+	return binding_resource contains "projects/" + host_project_identifier and binding_resource contains "/subnetworks/"
+}
+
+is_host_project = func(project) {
+	return project_matches(project, host_project_identifier)
+}
+
+// Checks that a given project is the trusted images project
+is_trusted_images_project = func(project) {
+	if project == null {
+		return false
+	}
+
+	return is_folder_specific_trusted_images_project(project) or is_shared_trusted_images_project(project)
+}
+
+// Checks that a given project is the trusted images project
+is_shared_trusted_images_project = func(project) {
+	return project_matches(project, shared_trusted_image_project) or project_matches(project, app_shared_trusted_image_project) or project_matches(project, os_shared_trusted_image_project)
+}
+
+// Checks that a given project is the env-specific trusted images project
+is_folder_specific_trusted_images_project = func(project) {
+	if project == null {
+		return false
+	}
+	if tfenv() != "prd" and tfenv() != "shd" {
+		return project_matches(project, non_prod_trusted_image_project)
+	} else {
+		return false
+	}
+}
+
+// Check whether the project is the consul project
+is_consul_project = func(project) {
+	return project_matches(project, "eminent-termite-943649")
+}
+
+is_compute_sa = func(account_email) {
+
+	//                    SA prefix is optional,
+	//                                     then some mandatory chars for the account ID.
+	//                                                       The @ and everything after it is optional.
+	//                                                          This group must match project ID strings only e.g. not container-engine-robot
+	a_custom_sa_regex = "^(serviceAccount:)?[a-z][a-z0-9\\-]+@([a-z]+-[a-z]+-[0-9]+)\\.iam\\.gserviceaccount\\.com$"
+
+	if types.type_of(account_email) == "null" {
+		return false
+	}
+
+	return account_email matches a_custom_sa_regex and not is_vault_managed_sa_member(account_email)
+}
+
+is_vault_managed_sa_member = func(member_field) {
+	vault_sa_regex = "^(serviceAccount:)?vault(.+)@(.+)\\.iam\\.gserviceaccount\\.com$"
+	return member_field matches vault_sa_regex
+}
+
+tfapp = func() {
+	parts = strings.split(tfrun.workspace.name, "-")
+	return strings.join(parts[1 : length(parts) - 1], "-")
+}
+
+tfenv = func() {
+	return strings.split(tfrun.workspace.name, "-")[0]
+}
+
+env_regexes = {
+	"prv": "prv[0-9]?",
+	"dev": "dev[0-9]?",
+	"tst": "tst[0-9]?",
+	"uat": "uat[0-9]?",
+	"shd": "shd",
+	"prd": "prd[0-9]?",
+	"npd": "npd",
+}
+
+env_app_regex = func(envs, apps) {
+	re = ""
+	if length(envs) > 0 {
+		re += "^("
+		for envs as i, env {
+			if i != 0 {
+				re += "|"
+			}
+			re += env_regexes[env]
+		}
+		re += ")"
+	}
+	re += "-"
+	if length(apps) > 0 {
+		re += "("
+		for apps as i, app {
+			if i != 0 {
+				re += "|"
+			}
+			re += app
+		}
+		re += ")$"
+	}
+
+	return re
+}
+
+merge_by_app_env = func(permitted_iam_roles_config) {
+	roles = []
+	envapp = tfenv() + "-" + tfapp()
+	for permitted_iam_roles_config as regex, roles_config {
+		if envapp matches regex {
+			roles = roles + roles_config
+		}
+	}
+	return utilities.unique(roles)
+}
+
+permitted_subnetworks = {
+	env_app_regex(["prv"], []): [
+		"shd-private1-prv1-euw1",
+		"shd-private1-prv1-euw2",
+	],
+	env_app_regex(["dev", "tst", "uat"], []): [
+		"shd-private1-npd1-euw1",
+		"shd-private1-npd1-euw2",
+	],
+	env_app_regex(["prd"], []): [
+		"shd-private1-prd1-euw1",
+		"shd-private1-prd1-euw2",
+	],
+	env_app_regex(["shd"], []): [
+		"shd-private1-shd1-euw1",
+		"shd-private1-shd1-euw2",
+	],
+}
