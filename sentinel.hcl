@@ -1,9 +1,9 @@
 
-  module {
+  module "standards" {
     source = "standards.sentinel"
   }
 
-  module {
+  module "utilities" {
     source = "utilities.sentinel"
   }
 
