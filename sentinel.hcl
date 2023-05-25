@@ -1,10 +1,10 @@
 
   module "standards" {
-    source = "./standards.sentinel"
+    source = "./modules/standards.sentinel"
   }
 
   module "utilities" {
-    source = "./utilities.sentinel"
+    source = "./modules/utilities.sentinel"
   }
 
 policy "vault_ensure_gcp_secret_static_account_onprem_v2" {
